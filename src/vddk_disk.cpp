@@ -344,10 +344,17 @@ bool Vddk::Session::connect(const ConnectParams& params, bool readOnly)
             vixError = vddk().prepareForAccess(connectParams, m_params.identity.c_str());
         }
 
-        if (!vixOk("failed to prepare the virtual machine for access", vixError)) {
-            return false;
+        // A standalone ESXi host has no vCenter to hold the relocation lock
+        // PrepareForAccess takes, and answers VIX_E_NOT_SUPPORTED_ON_REMOTE_OBJECT.
+        // Nothing can move the VM there behind our back anyway, so there is
+        // nothing to prepare and, with m_accessPrepared left false, nothing for
+        // EndAccess to release either.
+        if (VIX_ERROR_CODE(vixError) != VIX_E_NOT_SUPPORTED_ON_REMOTE_OBJECT) {
+            if (!vixOk("failed to prepare the virtual machine for access", vixError)) {
+                return false;
+            }
+            m_accessPrepared = true;
         }
-        m_accessPrepared = true;
     }
 
     VixDiskLibConnection connection = nullptr;
