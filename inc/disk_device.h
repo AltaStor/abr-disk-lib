@@ -126,10 +126,12 @@ namespace Disk
 {
     // The virtual disk backends this build of the library carries. Which ones
     // it does is decided when the library is configured (ABR_DISK_WITH_VHDX,
-    // ABR_DISK_WITH_VDDK), and a caller that includes a backend's header also
-    // sees it at compile time, as ABR_DISK_HAVE_VHDX and ABR_DISK_HAVE_VDDK.
+    // ABR_DISK_WITH_VDDK, ABR_DISK_WITH_SOAP), and a caller that includes a
+    // backend's header also sees it at compile time, as ABR_DISK_HAVE_VHDX,
+    // ABR_DISK_HAVE_VDDK and ABR_DISK_HAVE_SOAP.
     bool hasVhdx();
     bool hasVddk();
+    bool hasSoap();
 
     // The logical and physical sector size of the disk or volume at path, as
     // the host's storage stack reports them -- BLKSSZGET and BLKPBSZGET on

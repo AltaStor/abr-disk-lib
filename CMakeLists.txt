@@ -19,6 +19,8 @@
 #   ABR_DISK_WITH_VHDX   AUTO | ON | OFF   Hyper-V VHD/VHDX; Windows targets only
 #   ABR_DISK_WITH_VDDK   AUTO | ON | OFF   VMware VMDK through the VDDK
 #   VDDK_DIR             an extracted VDDK, for its headers
+#   ABR_DISK_WITH_SOAP   AUTO | ON | OFF   VMware VMDK through the vSphere SOAP API (vsphere-soap-lib)
+#   VSPHERE_SOAP_LIB_DIR vsphere-soap-lib's source tree (default: the submodule)
 #   ABR_DISK_BUILD_TESTS ON | OFF          the self-test (default: ON standalone)
 cmake_minimum_required(VERSION 3.20)
 
@@ -73,12 +75,15 @@ endif()
 
 set(ABR_DISK_WITH_VHDX "AUTO" CACHE STRING "Hyper-V VHD/VHDX backend: AUTO, ON or OFF")
 set(ABR_DISK_WITH_VDDK "AUTO" CACHE STRING "VMware VDDK backend: AUTO, ON or OFF")
+set(ABR_DISK_WITH_SOAP "AUTO" CACHE STRING "VMware SOAP backend (vsphere-soap-lib): AUTO, ON or OFF")
 set_property(CACHE ABR_DISK_WITH_VHDX PROPERTY STRINGS AUTO ON OFF)
 set_property(CACHE ABR_DISK_WITH_VDDK PROPERTY STRINGS AUTO ON OFF)
+set_property(CACHE ABR_DISK_WITH_SOAP PROPERTY STRINGS AUTO ON OFF)
 
 set(VDDK_DIR "" CACHE PATH "Path to the VMware VDDK root (its include/ is what the build needs)")
+set(VSPHERE_SOAP_LIB_DIR "${CMAKE_CURRENT_LIST_DIR}/vsphere-soap-lib" CACHE PATH "vsphere-soap-lib source tree")
 
-foreach(_abr_disk_backend IN ITEMS VHDX VDDK)
+foreach(_abr_disk_backend IN ITEMS VHDX VDDK SOAP)
     if(NOT ABR_DISK_WITH_${_abr_disk_backend} MATCHES "^(AUTO|ON|OFF)$")
         message(FATAL_ERROR
             "ABR_DISK_WITH_${_abr_disk_backend} is '${ABR_DISK_WITH_${_abr_disk_backend}}'; "
@@ -117,6 +122,29 @@ if(_abr_disk_vddk AND NOT EXISTS "${_abr_disk_vddk_header}")
     message(FATAL_ERROR
         "ABR_DISK_WITH_VDDK=ON, but the VDDK headers are not at ${_abr_disk_vddk_header}.\n"
         "Point CMake at an extracted VDDK with -DVDDK_DIR=/path/to/vddk")
+endif()
+
+# VMware without the VDDK: vsphere-soap-lib, a submodule, speaks the vSphere SOAP API and HTTPS itself. AUTO is
+# "where the submodule is" on a target other than Windows, where it has not been built yet; Boost and pugixml are
+# found or fetched by the library itself.
+if(EXISTS "${VSPHERE_SOAP_LIB_DIR}/CMakeLists.txt")
+    set(_abr_disk_soap_present TRUE)
+else()
+    set(_abr_disk_soap_present FALSE)
+endif()
+if(ABR_DISK_WITH_SOAP STREQUAL "AUTO")
+    if(_abr_disk_soap_present AND NOT WIN32)
+        set(_abr_disk_soap TRUE)
+    else()
+        set(_abr_disk_soap FALSE)
+    endif()
+else()
+    set(_abr_disk_soap ${ABR_DISK_WITH_SOAP})
+endif()
+if(_abr_disk_soap AND NOT _abr_disk_soap_present)
+    message(FATAL_ERROR
+        "ABR_DISK_WITH_SOAP=ON, but vsphere-soap-lib is not at ${VSPHERE_SOAP_LIB_DIR}.\n"
+        "Run 'git submodule update --init --recursive', or name another checkout with -DVSPHERE_SOAP_LIB_DIR=")
 endif()
 
 # --- The library --------------------------------------------------------------
@@ -168,6 +196,18 @@ if(_abr_disk_vddk)
     target_link_libraries(abr-disk-lib PUBLIC ${CMAKE_DL_LIBS})
 endif()
 
+if(_abr_disk_soap)
+    # Its own binary directory, since the source tree may be anywhere. Added from here, the library builds neither
+    # its tests nor its examples, and installs nothing.
+    add_subdirectory("${VSPHERE_SOAP_LIB_DIR}" vsphere_soap_lib_build)
+
+    target_sources(abr-disk-lib PRIVATE src/soap_disk.cpp)
+    target_compile_definitions(abr-disk-lib PUBLIC ABR_DISK_HAVE_SOAP)
+
+    # PRIVATE: soap_disk.h names nothing of the library's.
+    target_link_libraries(abr-disk-lib PRIVATE VSphereSoap::vsphere-soap)
+endif()
+
 target_include_directories(abr-disk-lib PUBLIC "${CMAKE_CURRENT_LIST_DIR}/inc")
 target_include_directories(abr-disk-lib PRIVATE "${CMAKE_CURRENT_LIST_DIR}/src")
 
@@ -214,6 +254,9 @@ if(_abr_disk_vhdx)
 endif()
 if(_abr_disk_vddk)
     string(APPEND _abr_disk_backends ", VMware VDDK (${VDDK_DIR})")
+endif()
+if(_abr_disk_soap)
+    string(APPEND _abr_disk_backends ", VMware SOAP (${VSPHERE_SOAP_LIB_DIR})")
 endif()
 message(STATUS "abr-disk-lib: ${CMAKE_SYSTEM_NAME} target, backends: ${_abr_disk_backends}")
 

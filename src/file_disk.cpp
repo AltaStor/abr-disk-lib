@@ -66,3 +66,12 @@ bool Disk::hasVddk()
     return false;
 #endif
 }
+
+bool Disk::hasSoap()
+{
+#ifdef ABR_DISK_HAVE_SOAP
+    return true;
+#else
+    return false;
+#endif
+}
