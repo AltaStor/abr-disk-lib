@@ -1,4 +1,4 @@
 [submodule "vsphere-soap-lib"]
 	path = vsphere-soap-lib
 	url = https://github.com/AltaStor/vsphere-soap-lib.git
-	branch = work
+	branch = main
