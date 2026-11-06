@@ -14,6 +14,7 @@ It is the bottom layer of `abr-vhdx-tool`, `abr-vmdk-tool` and other utils.
 | Plain file, disk or volume device | `FileDiskReader`, `FileDiskWriter` | `disk_device.h` | a path or a device (`/dev/sdb`, `\\.\PhysicalDrive2`, `\\.\E:`) | a path on an NFS mount or an SMB share | all |
 | Hyper-V VHD, VHDX, AVHDX | `Vhdx::DiskReader`, `Vhdx::DiskWriter` | `vhdx_disk.h` | a path on the host | a UNC path on an SMB 3 share, with `Vhdx::ShareCredentials` or the process's own logon | Windows |
 | VMware VMDK | `Vddk::DiskReader`, `Vddk::DiskWriter` (on a `Vddk::Session`) | `vddk_disk.h` | a `.vmdk` file | a VM's disk on an ESXi host or a vCenter (`Vddk::ConnectParams::host`) | Linux; Windows on request |
+| VMware VMDK, no VDDK | `Soap::DiskReader`, `Soap::DiskWriter` | `soap_disk.h` | | a VM's disk on an ESXi host or a vCenter, over the vSphere SOAP API and HTTPS (vsphere-soap-lib) | Linux; Windows on request |
 
 Every class is default constructed and then `open()`ed; a failure is reported
 on `std::cerr` behind `Error: ` and `open()` returns false. `openFileReader`,
@@ -41,18 +42,26 @@ on Linux: reading the format behind the service's back would also mean walking
 differencing chains and replaying logs the way Hyper-V does, and getting that
 subtly wrong in a backup is worse than not offering it.
 
+`Soap::` reaches the same disks as `Vddk::` with no VMware library at all, but not in the same way. A backup
+of a running VM, or of a disk with snapshots, comes from vSphere's export of a snapshot, which streams the disk
+whole: reads ascend, and an incremental downloads all of the disk's data to keep its changes. A restore writes a
+whole disk, never part of one: it overwrites a powered-off VM's disk in place, or creates a new one, attached
+to a VM or placed at a datastore path. [soap_disk.h](inc/soap_disk.h) has the details.
+
 The public headers name nothing of Windows' or of the VDDK's (`win_util.h` and
 `win_disk.h` aside, which are the Windows helpers themselves), so
-`vhdx_disk.h` and `vddk_disk.h` can be included on any target. Whether the
-library behind them carries the backend is `ABR_DISK_HAVE_VHDX` /
-`ABR_DISK_HAVE_VDDK` at compile time — defined for whoever links the library —
-and `Disk::hasVhdx()` / `Disk::hasVddk()` at run time.
+`vhdx_disk.h`, `vddk_disk.h` and `soap_disk.h` can be included on any target.
+Whether the library behind them carries the backend is `ABR_DISK_HAVE_VHDX` /
+`ABR_DISK_HAVE_VDDK` / `ABR_DISK_HAVE_SOAP` at compile time — defined for whoever
+links the library — and `Disk::hasVhdx()` / `Disk::hasVddk()` / `Disk::hasSoap()`
+at run time.
 
 ## Building
 
 Three targets, chosen with one parameter:
 
 ```bash
+git submodule update --init                            # vsphere-soap-lib, for the SOAP backend
 cmake -S . -B build -DABR_DISK_TARGET=linux            # Linux, natively
 cmake -S . -B build -DABR_DISK_TARGET=windows          # Windows, natively (MSVC, or MinGW under MSYS2)
 cmake -S . -B build -DABR_DISK_TARGET=windows-cross    # Windows, from Linux, with MinGW-w64
@@ -72,6 +81,8 @@ cmake --preset windows-cross && cmake --build --preset windows-cross
 | `ABR_DISK_WITH_VHDX` | `AUTO`, `ON`, `OFF` | `AUTO` | The Hyper-V backend. `AUTO` is on for a Windows target. `ON` for any other target is an error. |
 | `ABR_DISK_WITH_VDDK` | `AUTO`, `ON`, `OFF` | `AUTO` | The VMware backend. `AUTO` is on for a Linux target when `VDDK_DIR` has the headers; on Windows it has to be asked for. |
 | `VDDK_DIR` | a path | empty | An extracted VDDK. Only `include/vixDiskLib.h` is needed to build: the library is bound at run time. |
+| `ABR_DISK_WITH_SOAP` | `AUTO`, `ON`, `OFF` | `AUTO` | The VMware backend without the VDDK. `AUTO` is on for a non-Windows target when the `vsphere-soap-lib` submodule is there; on Windows it has to be asked for. Boost and pugixml are found installed or fetched by that library. |
+| `VSPHERE_SOAP_LIB_DIR` | a path | `vsphere-soap-lib/` | Another checkout of vsphere-soap-lib. |
 | `ABR_DISK_BUILD_TESTS` | `ON`, `OFF` | `ON` standalone, `OFF` in a tool | The self-test. |
 
 `ABR_DISK_TARGET` changes the toolchain, which CMake reads once per build
@@ -116,7 +127,8 @@ target_link_libraries(my-program PRIVATE abr-disk-lib)
 ```
 inc/  disk_device.h      IDiskReader / IDiskWriter, the file classes, Disk::
       vhdx_disk.h        Vhdx:: -- Hyper-V
-      vddk_disk.h        Vddk:: -- VMware
+      vddk_disk.h        Vddk:: -- VMware through the VDDK
+      soap_disk.h        Soap:: -- VMware through the SOAP API
       win_util.h         Win:: helpers (Windows only)
       win_disk.h         Win::RawDisk, raw disk and volume access (Windows only)
 src/  file_disk.cpp           the exported file classes
@@ -126,7 +138,9 @@ src/  file_disk.cpp           the exported file classes
       vhdx_disk.cpp, virtdisk_api.{h,cpp}        virtdisk.dll, bound at run time
       vddk_disk.cpp, vddk_api.{h,cpp}            the VDDK, bound at run time
       vddk_loader.h, vddk_loader_{posix,windows}.cpp
+      soap_disk.cpp           Soap::, over vsphere-soap-lib
       disk_detail.h           what the exported classes share
+vsphere-soap-lib/             the SOAP backend's library (submodule)
 cmake/select-target.cmake     ABR_DISK_TARGET -> a toolchain
       mingw-w64-x86_64.cmake  the cross toolchain
 test/selftest.cpp

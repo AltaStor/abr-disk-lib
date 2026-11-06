@@ -20,6 +20,7 @@
 
 #include "disk_device.h"
 #include "vddk_disk.h"
+#include "soap_disk.h"
 #include "vhdx_disk.h"
 
 namespace {
@@ -195,6 +196,37 @@ void testBackends()
 #else
     CHECK(!Disk::hasVddk());
 #endif
+
+#ifdef ABR_DISK_HAVE_SOAP
+    CHECK(Disk::hasSoap());
+
+    // Unopened, and refused before any connection is made: no host is reached from here.
+    Soap::DiskReader soapReader;
+    Soap::DiskWriter soapWriter;
+    std::vector<ByteRange> ranges;
+    uint8_t byte = 0;
+    CHECK(soapReader.geometry().sectors == 0);
+    CHECK(!soapReader.dataRanges(ranges));
+    CHECK(!soapReader.read(0, 1, &byte));
+    CHECK(soapReader.nextChangeId().empty());
+    CHECK(!soapWriter.write(0, 1, &byte));
+    CHECK(!soapWriter.finish());
+    CHECK(!soapWriter.creates());
+
+    Soap::ConnectParams params;
+    params.host = "vcenter.invalid";
+    params.user = "backup";
+    params.vm = "vm-1";
+    CHECK(!soapReader.open(params, "dir/disk.vmdk"));      // no datastore
+    CHECK(!soapReader.open(params, "[ds] "));              // no file
+    CHECK(!soapWriter.open(params, "dir/disk.vmdk", 4096)); // neither a name nor a path
+
+    params.vm.clear();
+    CHECK(!soapReader.open(params, "[ds] dir/disk.vmdk"));  // reading needs the VM
+    CHECK(!soapWriter.open(params, "disk.vmdk", 4096));     // a disk without a VM needs a path
+#else
+    CHECK(!Disk::hasSoap());
+#endif
 }
 
 } // namespace
@@ -211,7 +243,7 @@ int main(int argc, char* argv[])
     std::filesystem::create_directories(std::filesystem::path(directory), ec);
 
     std::cout << "Backends: file/device" << (Disk::hasVhdx() ? ", Hyper-V VHD/VHDX" : "")
-              << (Disk::hasVddk() ? ", VMware VDDK" : "") << "\n";
+              << (Disk::hasVddk() ? ", VMware VDDK" : "") << (Disk::hasSoap() ? ", VMware SOAP" : "") << "\n";
 
     // The failures these provoke are reported on std::cerr, as they would be
     // to a tool; the verdict is on std::cout.
