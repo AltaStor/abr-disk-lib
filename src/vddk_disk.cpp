@@ -6,6 +6,7 @@
 #include "vddk_disk.h"
 
 #include <algorithm>
+#include <fstream>
 #include <iostream>
 
 #include "disk_detail.h"
@@ -309,11 +310,20 @@ bool Vddk::Session::connect(const ConnectParams& params, bool readOnly)
         return false;
     }
 
-    // Init is told where that installation turned out to be so that it looks
+    // A configuration file the library cannot read is not an error to the VDDK: it starts with its defaults.
+    // What the file was meant to switch on then fails much later and for no stated reason, as a restore whose
+    // disk will not open for writing, so the file is checked here where its name can still be reported.
+    if (!m_params.configFile.empty() && !std::ifstream(m_params.configFile)) {
+        std::cerr << "Error: cannot read the VDDK configuration file '" << m_params.configFile << "'\n";
+        return false;
+    }
+
+    // InitEx is told where that installation turned out to be so that it looks
     // for the transport plugins in the same bundle the library came from.
+    // Every VDDK since 1.1 has InitEx, and with no configuration file it is what Init was.
     if (!vixOk("failed to initialize VDDK",
-               vddk().init(kVersionMajor, kVersionMinor, nullptr, nullptr, nullptr,
-                           optionalStr(installRoot())))) {
+               vddk().initEx(kVersionMajor, kVersionMinor, nullptr, nullptr, nullptr,
+                             optionalStr(installRoot()), optionalStr(m_params.configFile)))) {
         return false;
     }
     m_initialized = true;

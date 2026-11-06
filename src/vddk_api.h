@@ -19,7 +19,7 @@ namespace Vddk
     // list is what stops them drifting apart as the library grows.
     //
 #define VDDK_ENTRY_POINTS(X)                                    \
-    X(init,                  VixDiskLib_Init)                   \
+    X(initEx,                VixDiskLib_InitEx)                 \
     X(exit,                  VixDiskLib_Exit)                   \
     X(allocateConnectParams, VixDiskLib_AllocateConnectParams)  \
     X(freeConnectParams,     VixDiskLib_FreeConnectParams)      \
@@ -67,7 +67,7 @@ namespace Vddk
     bool loadLibrary(const std::string& directory = {});
 
     // Root of the installation the library was actually loaded from, for
-    // VixDiskLib_Init to find the transport plugins under. Empty until
+    // VixDiskLib_InitEx to find the transport plugins under. Empty until
     // loadLibrary succeeds, and also if the loader declines to say.
     const std::string& installRoot();
 

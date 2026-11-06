@@ -30,7 +30,7 @@ bool bindEntryPoint(Fn& entryPoint, const char* symbol)
     return true;
 }
 
-// The bundle's own directory: VixDiskLib_Init needs the installation root so it
+// The bundle's own directory: VixDiskLib_InitEx needs the installation root so it
 // can find the transport plugins.
 std::string g_installRoot;
 
@@ -42,7 +42,7 @@ void rememberInstallRoot()
     }
 
     // The libraries live in lib64 of the installation, or in bin on Windows;
-    // VixDiskLib_Init wants the directory above it. A layout that keeps them in
+    // VixDiskLib_InitEx wants the directory above it. A layout that keeps them in
     // the root is taken as-is.
     std::filesystem::path directory(origin);
     const std::string leaf = directory.filename().string();

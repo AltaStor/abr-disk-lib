@@ -38,6 +38,10 @@ namespace Vddk
         // path -- LD_LIBRARY_PATH on Linux, which is also the only search path
         // that reaches the plugins the VDDK goes on to load for itself.
         std::string libraryDir;
+
+        // VDDK configuration file handed to VixDiskLib_InitEx, the same file VMware documents for its transport
+        // and logging settings. Empty passes none, which is what VixDiskLib_Init did.
+        std::string configFile;
     };
 
     //
