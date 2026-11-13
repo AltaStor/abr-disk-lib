@@ -1,0 +1,6 @@
+build/
+build-*/
+CMakeFiles/
+CMakeCache.txt
+.vscode/
+*.local.md
