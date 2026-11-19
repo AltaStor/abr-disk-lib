@@ -1,6 +1,6 @@
 #!/bin/bash
 # SPDX-License-Identifier: Apache-2.0
-# Copyright © 2026 Norvitex OÜ
+# Copyright © 2026 Norvitex OÜ (AltaStor.com)
 #
 # Reads qemu-storage-daemon exports with Nbd::DiskReader, through abr-disk-nbd-read, and checks the result against
 # what was written and against nbdinfo --map: a full read, a dirty bitmap, a missing bitmap, an NBD URI, a rate limit

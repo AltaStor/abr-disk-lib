@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright © 2026 Norvitex OÜ
+// Copyright © 2026 Norvitex OÜ (AltaStor.com)
 //
 // Test helper for nbd-selftest.sh: reads an NBD export with Nbd::DiskReader, prints the context, the geometry and the
 // ranges, and writes what it read into a sparse image of the export's size.
