@@ -75,3 +75,12 @@ bool Disk::hasSoap()
     return false;
 #endif
 }
+
+bool Disk::hasNbd()
+{
+#ifdef ABR_DISK_HAVE_NBD
+    return true;
+#else
+    return false;
+#endif
+}

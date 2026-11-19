@@ -21,6 +21,7 @@
 #   VDDK_DIR             an extracted VDDK, for its headers
 #   ABR_DISK_WITH_SOAP   AUTO | ON | OFF   VMware VMDK through the vSphere SOAP API (vsphere-soap-lib)
 #   VSPHERE_SOAP_LIB_DIR vsphere-soap-lib's source tree (default: the submodule)
+#   ABR_DISK_WITH_NBD    AUTO | ON | OFF   NBD exports through libnbd, such as Proxmox VE's backup exports; Linux only
 #   ABR_DISK_BUILD_TESTS ON | OFF          the self-test (default: ON standalone)
 cmake_minimum_required(VERSION 3.20)
 
@@ -76,14 +77,16 @@ endif()
 set(ABR_DISK_WITH_VHDX "AUTO" CACHE STRING "Hyper-V VHD/VHDX backend: AUTO, ON or OFF")
 set(ABR_DISK_WITH_VDDK "AUTO" CACHE STRING "VMware VDDK backend: AUTO, ON or OFF")
 set(ABR_DISK_WITH_SOAP "AUTO" CACHE STRING "VMware SOAP backend (vsphere-soap-lib): AUTO, ON or OFF")
+set(ABR_DISK_WITH_NBD "AUTO" CACHE STRING "NBD backend (libnbd): AUTO, ON or OFF")
 set_property(CACHE ABR_DISK_WITH_VHDX PROPERTY STRINGS AUTO ON OFF)
 set_property(CACHE ABR_DISK_WITH_VDDK PROPERTY STRINGS AUTO ON OFF)
 set_property(CACHE ABR_DISK_WITH_SOAP PROPERTY STRINGS AUTO ON OFF)
+set_property(CACHE ABR_DISK_WITH_NBD PROPERTY STRINGS AUTO ON OFF)
 
 set(VDDK_DIR "" CACHE PATH "Path to the VMware VDDK root (its include/ is what the build needs)")
 set(VSPHERE_SOAP_LIB_DIR "${CMAKE_CURRENT_LIST_DIR}/vsphere-soap-lib" CACHE PATH "vsphere-soap-lib source tree")
 
-foreach(_abr_disk_backend IN ITEMS VHDX VDDK SOAP)
+foreach(_abr_disk_backend IN ITEMS VHDX VDDK SOAP NBD)
     if(NOT ABR_DISK_WITH_${_abr_disk_backend} MATCHES "^(AUTO|ON|OFF)$")
         message(FATAL_ERROR
             "ABR_DISK_WITH_${_abr_disk_backend} is '${ABR_DISK_WITH_${_abr_disk_backend}}'; "
@@ -145,6 +148,35 @@ if(_abr_disk_soap AND NOT _abr_disk_soap_present)
     message(FATAL_ERROR
         "ABR_DISK_WITH_SOAP=ON, but vsphere-soap-lib is not at ${VSPHERE_SOAP_LIB_DIR}.\n"
         "Run 'git submodule update --init --recursive', or name another checkout with -DVSPHERE_SOAP_LIB_DIR=")
+endif()
+
+# NBD: libnbd, found through pkg-config, in version 1.18 or later for nbd_block_status_64. AUTO is "on a Linux target
+# where libnbd is installed", since libnbd is packaged for Linux only. GLOBAL, because the static library hands the
+# link on to the tool, which is linked in another directory. The imported target is what counts: the cached
+# ABR_DISK_LIBNBD_FOUND outlives a pkg-config that has gone since the last configure.
+set(_abr_disk_nbd FALSE)
+set(_abr_disk_libnbd FALSE)
+if(NOT ABR_DISK_WITH_NBD STREQUAL "OFF" AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    find_package(PkgConfig QUIET)
+    if(PKG_CONFIG_FOUND)
+        pkg_check_modules(ABR_DISK_LIBNBD QUIET IMPORTED_TARGET GLOBAL libnbd>=1.18)
+        if(TARGET PkgConfig::ABR_DISK_LIBNBD)
+            set(_abr_disk_libnbd TRUE)
+        endif()
+    endif()
+endif()
+if(ABR_DISK_WITH_NBD STREQUAL "AUTO")
+    set(_abr_disk_nbd ${_abr_disk_libnbd})
+elseif(ABR_DISK_WITH_NBD)
+    if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        message(FATAL_ERROR "ABR_DISK_WITH_NBD=ON needs a Linux target, where libnbd is packaged.")
+    endif()
+    if(NOT _abr_disk_libnbd)
+        message(FATAL_ERROR
+            "ABR_DISK_WITH_NBD=ON, but pkg-config finds no libnbd 1.18 or later.\n"
+            "Install it, on Debian and Ubuntu with 'apt install libnbd-dev'.")
+    endif()
+    set(_abr_disk_nbd TRUE)
 endif()
 
 # --- The library --------------------------------------------------------------
@@ -213,6 +245,14 @@ if(_abr_disk_soap)
     target_link_libraries(abr-disk-lib PRIVATE VSphereSoap::vsphere-soap)
 endif()
 
+if(_abr_disk_nbd)
+    target_sources(abr-disk-lib PRIVATE src/nbd_disk.cpp)
+    target_compile_definitions(abr-disk-lib PUBLIC ABR_DISK_HAVE_NBD)
+
+    # PRIVATE: nbd_disk.h names nothing of libnbd's. The tool links the shared library from the system.
+    target_link_libraries(abr-disk-lib PRIVATE PkgConfig::ABR_DISK_LIBNBD)
+endif()
+
 target_include_directories(abr-disk-lib PUBLIC "${CMAKE_CURRENT_LIST_DIR}/inc")
 target_include_directories(abr-disk-lib PRIVATE "${CMAKE_CURRENT_LIST_DIR}/src")
 
@@ -263,6 +303,9 @@ endif()
 if(_abr_disk_soap)
     string(APPEND _abr_disk_backends ", VMware SOAP (${VSPHERE_SOAP_LIB_DIR})")
 endif()
+if(_abr_disk_nbd)
+    string(APPEND _abr_disk_backends ", NBD (libnbd ${ABR_DISK_LIBNBD_VERSION})")
+endif()
 message(STATUS "abr-disk-lib: ${CMAKE_SYSTEM_NAME} target, backends: ${_abr_disk_backends}")
 
 # --- The self-test ------------------------------------------------------------
@@ -286,5 +329,24 @@ if(ABR_DISK_BUILD_TESTS)
     if(NOT CMAKE_CROSSCOMPILING OR CMAKE_CROSSCOMPILING_EMULATOR)
         add_test(NAME abr-disk-selftest
             COMMAND abr-disk-selftest "${CMAKE_CURRENT_BINARY_DIR}/selftest-scratch")
+    endif()
+
+    # The NBD backend is read against qemu-storage-daemon exports, so its test needs QEMU's tools and nbdinfo.
+    if(_abr_disk_nbd)
+        add_executable(abr-disk-nbd-read test/nbd_read.cpp)
+        target_link_libraries(abr-disk-nbd-read PRIVATE abr-disk-lib)
+
+        find_program(ABR_DISK_QEMU_STORAGE_DAEMON qemu-storage-daemon)
+        find_program(ABR_DISK_QEMU_IMG qemu-img)
+        find_program(ABR_DISK_QEMU_IO qemu-io)
+        find_program(ABR_DISK_NBDINFO nbdinfo)
+        if(ABR_DISK_QEMU_STORAGE_DAEMON AND ABR_DISK_QEMU_IMG AND ABR_DISK_QEMU_IO AND ABR_DISK_NBDINFO)
+            add_test(NAME abr-disk-nbd-selftest
+                COMMAND "${CMAKE_CURRENT_LIST_DIR}/test/nbd-selftest.sh" "$<TARGET_FILE:abr-disk-nbd-read>"
+                        "${CMAKE_CURRENT_BINARY_DIR}/nbd-selftest-scratch")
+        else()
+            message(STATUS "abr-disk-lib: the NBD self-test is left out; it needs qemu-storage-daemon, qemu-img, "
+                           "qemu-io and nbdinfo")
+        endif()
     endif()
 endif()

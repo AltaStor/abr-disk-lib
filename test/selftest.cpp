@@ -8,6 +8,7 @@
 // process on a Hyper-V host, a VDDK and something for it to open -- and are
 // tested from the tools, end to end. This only reports which of them the build
 // carries.
+// The NBD backend is the exception: nbd-selftest.sh reads a qemu-storage-daemon export with it.
 //
 #include <algorithm>
 #include <cstdint>
@@ -19,6 +20,7 @@
 #include <vector>
 
 #include "disk_device.h"
+#include "nbd_disk.h"
 #include "vddk_disk.h"
 #include "soap_disk.h"
 #include "vhdx_disk.h"
@@ -227,6 +229,30 @@ void testBackends()
 #else
     CHECK(!Disk::hasSoap());
 #endif
+
+#ifdef ABR_DISK_HAVE_NBD
+    CHECK(Disk::hasNbd());
+
+    // Unopened, and refused before any server is reached. A live export is tested by nbd-selftest.sh.
+    Nbd::DiskReader nbdReader;
+    std::vector<ByteRange> nbdRanges;
+    uint8_t nbdByte = 0;
+    CHECK(nbdReader.geometry().sectors == 0);
+    CHECK(!nbdReader.dataRanges(nbdRanges));
+    CHECK(!nbdReader.read(0, 1, &nbdByte));
+    CHECK(nbdReader.properties().size == 0);
+    CHECK(nbdReader.discardedBytes() == 0);
+
+    Nbd::ReaderParams nbdParams;
+    CHECK(!nbdReader.open(nbdParams));                                      // no server
+    nbdParams.server = "nbd+unix:///disk?socket=/nonexistent/abr.sock";
+    nbdParams.exportName = "disk";
+    CHECK(!nbdReader.open(nbdParams));                                      // a URI names its own export
+    nbdParams.server = "/nonexistent/abr.sock";
+    CHECK(Nbd::openReader(nbdParams) == nullptr);                           // nothing listens there
+#else
+    CHECK(!Disk::hasNbd());
+#endif
 }
 
 } // namespace
@@ -243,7 +269,8 @@ int main(int argc, char* argv[])
     std::filesystem::create_directories(std::filesystem::path(directory), ec);
 
     std::cout << "Backends: file/device" << (Disk::hasVhdx() ? ", Hyper-V VHD/VHDX" : "")
-              << (Disk::hasVddk() ? ", VMware VDDK" : "") << (Disk::hasSoap() ? ", VMware SOAP" : "") << "\n";
+              << (Disk::hasVddk() ? ", VMware VDDK" : "") << (Disk::hasSoap() ? ", VMware SOAP" : "")
+              << (Disk::hasNbd() ? ", NBD" : "") << "\n";
 
     // The failures these provoke are reported on std::cerr, as they would be
     // to a tool; the verdict is on std::cout.

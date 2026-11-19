@@ -15,6 +15,7 @@ It is the bottom layer of `abr-vhdx-tool`, `abr-vmdk-tool` and other utils.
 | Hyper-V VHD, VHDX, AVHDX | `Vhdx::DiskReader`, `Vhdx::DiskWriter` | `vhdx_disk.h` | a path on the host | a UNC path on an SMB 3 share, with `Vhdx::ShareCredentials` or the process's own logon | Windows |
 | VMware VMDK | `Vddk::DiskReader`, `Vddk::DiskWriter` (on a `Vddk::Session`) | `vddk_disk.h` | a `.vmdk` file | a VM's disk on an ESXi host or a vCenter (`Vddk::ConnectParams::host`) | Linux; Windows on request |
 | VMware VMDK, no VDDK | `Soap::DiskReader`, `Soap::DiskWriter` | `soap_disk.h` | | a VM's disk on an ESXi host or a vCenter, over the vSphere SOAP API and HTTPS (vsphere-soap-lib) | Linux; Windows on request |
+| NBD export, read only | `Nbd::DiskReader` | `nbd_disk.h` | a Unix socket and an export name, such as a Proxmox VE backup export | an NBD URI (`nbd://host/export`) | Linux |
 
 Every class is default constructed and then `open()`ed; a failure is reported
 on `std::cerr` behind `Error: ` and `open()` returns false. `openFileReader`,
@@ -52,12 +53,19 @@ to a VM or placed at a datastore path. [soap_disk.h](inc/soap_disk.h) has the de
 `QueryChangedDiskAreas` over vsphere-soap-lib with the session's own host, credentials, VM and snapshot. That takes
 a build with the SOAP backend too, and a remote disk: a local VMDK has no incrementals.
 
-The public headers name nothing of Windows' or of the VDDK's (`win_util.h` and
+`Nbd::` reads an NBD export through libnbd, over one connection. An incremental reads the blocks of a QEMU dirty
+bitmap (`qemu:dirty-bitmap:<name>`), and an export without that bitmap is an error rather than a full read. A full
+read skips what `base:allocation` reports as reading zero, and reads the whole disk when the server has no allocation
+status. A connection negotiates only one of the two contexts, because QEMU broke one that negotiated both while the
+bitmap was clean. A rate limit and a discard after each read are optional. The discard frees the fleecing image of a
+Proxmox VE backup export, but erases the data of an export of a disk itself, so it is off unless asked for.
+
+The public headers name nothing of Windows', the VDDK's or libnbd's (`win_util.h` and
 `win_disk.h` aside, which are the Windows helpers themselves), so
-`vhdx_disk.h`, `vddk_disk.h` and `soap_disk.h` can be included on any target.
+`vhdx_disk.h`, `vddk_disk.h`, `soap_disk.h` and `nbd_disk.h` can be included on any target.
 Whether the library behind them carries the backend is `ABR_DISK_HAVE_VHDX` /
-`ABR_DISK_HAVE_VDDK` / `ABR_DISK_HAVE_SOAP` at compile time — defined for whoever
-links the library — and `Disk::hasVhdx()` / `Disk::hasVddk()` / `Disk::hasSoap()`
+`ABR_DISK_HAVE_VDDK` / `ABR_DISK_HAVE_SOAP` / `ABR_DISK_HAVE_NBD` at compile time — defined for whoever
+links the library — and `Disk::hasVhdx()` / `Disk::hasVddk()` / `Disk::hasSoap()` / `Disk::hasNbd()`
 at run time.
 
 ## Building
@@ -87,6 +95,7 @@ cmake --preset windows-cross && cmake --build --preset windows-cross
 | `VDDK_DIR` | a path | empty | An extracted VDDK. Only `include/vixDiskLib.h` is needed to build: the library is bound at run time. |
 | `ABR_DISK_WITH_SOAP` | `AUTO`, `ON`, `OFF` | `AUTO` | The VMware backend without the VDDK. `AUTO` is on for a non-Windows target when the `vsphere-soap-lib` submodule is there; on Windows it has to be asked for. Boost and pugixml are found installed or fetched by that library. |
 | `VSPHERE_SOAP_LIB_DIR` | a path | `vsphere-soap-lib/` | Another checkout of vsphere-soap-lib. |
+| `ABR_DISK_WITH_NBD` | `AUTO`, `ON`, `OFF` | `AUTO` | The NBD backend. `AUTO` is on for a Linux target when pkg-config finds libnbd 1.18 or later (`libnbd-dev` on Debian and Ubuntu). `ON` without it, or for another target, is an error. |
 | `ABR_DISK_BUILD_TESTS` | `ON`, `OFF` | `ON` standalone, `OFF` in a tool | The self-test. |
 
 `ABR_DISK_TARGET` changes the toolchain, which CMake reads once per build
@@ -96,6 +105,10 @@ directory: use a fresh directory per target, as the presets do.
 on Debian and Ubuntu, `g++-mingw-w64-x86-64-posix`). A cross-built self-test
 is a Windows program; it is built, and run by `ctest` only when
 `CMAKE_CROSSCOMPILING_EMULATOR` names something like `wine`.
+
+With the NBD backend, `ctest` also runs `test/nbd-selftest.sh`, which reads `qemu-storage-daemon` exports of a small
+qcow2 with a dirty bitmap. It needs `qemu-storage-daemon`, `qemu-img` and `qemu-io` (`qemu-utils`) and `nbdinfo`
+(`libnbd-bin`), and is left out without them.
 
 ## Using it from a tool
 
@@ -133,6 +146,7 @@ inc/  disk_device.h      IDiskReader / IDiskWriter, the file classes, Disk::
       vhdx_disk.h        Vhdx:: -- Hyper-V
       vddk_disk.h        Vddk:: -- VMware through the VDDK
       soap_disk.h        Soap:: -- VMware through the SOAP API
+      nbd_disk.h         Nbd:: -- NBD exports through libnbd
       win_util.h         Win:: helpers (Windows only)
       win_disk.h         Win::RawDisk, raw disk and volume access (Windows only)
 src/  file_disk.cpp           the exported file classes
@@ -145,11 +159,13 @@ src/  file_disk.cpp           the exported file classes
       vddk_vadp.{h,cpp}       changed areas through the vSphere API
       soap_disk.cpp           Soap::, over vsphere-soap-lib
       soap_detail.h           what the users of vsphere-soap-lib share
+      nbd_disk.cpp            Nbd::, over libnbd
       disk_detail.h           what the exported classes share
 vsphere-soap-lib/             the SOAP backend's library (submodule)
 cmake/select-target.cmake     ABR_DISK_TARGET -> a toolchain
       mingw-w64-x86_64.cmake  the cross toolchain
 test/selftest.cpp
+     nbd_read.cpp, nbd-selftest.sh   the NBD backend against qemu-storage-daemon
 ```
 
 ## What has been tested
@@ -159,6 +175,8 @@ test/selftest.cpp
   Incrementals of a vCenter VM's disk at a snapshot, with the changed areas
   from the vSphere API and the data read through VDDK 9.1 and through a VDDK 8
   library, which read the same areas.
+- **NBD, Linux:** the self-test against `qemu-storage-daemon` from QEMU 10.0 with libnbd 1.22: full reads, a dirty
+  bitmap, a missing bitmap, an NBD URI, the rate limit and the discard.
 - **Windows, cross:** everything compiles and links, including
   `abr-vhdx-tool.exe`.
 - **Windows, native (MSVC):** not built yet.
