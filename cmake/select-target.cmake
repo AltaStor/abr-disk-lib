@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# Copyright © 2026 Norvitex OÜ
+# Copyright © 2026 Norvitex OÜ (AltaStor.com)
 #
 # Turns ABR_DISK_TARGET into a toolchain, before the first project() -- the one
 # moment CMake reads a toolchain file, which is why CMakeLists.txt includes

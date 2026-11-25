@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright © 2026 Norvitex OÜ
+// Copyright © 2026 Norvitex OÜ (AltaStor.com)
 //
 // Self-test of what can be tested without a hypervisor: the file backend,
 // through the exported classes, and what an unopened disk answers with.
