@@ -84,7 +84,7 @@ cmake --preset windows-cross && cmake --build --preset windows-cross
 | `ABR_DISK_TARGET` | `auto`, `linux`, `windows`, `windows-cross` | `auto` | `auto` is the host's own compiler, or whatever a `CMAKE_TOOLCHAIN_FILE` on the command line targets. A target the host cannot build is refused, not approximated. |
 | `ABR_DISK_WITH_VHDX` | `AUTO`, `ON`, `OFF` | `AUTO` | The Hyper-V backend. `AUTO` is on for a Windows target. `ON` for any other target is an error. |
 | `ABR_DISK_WITH_VDDK` | `AUTO`, `ON`, `OFF` | `AUTO` | The VMware backend. `AUTO` is on for a Linux target when `VDDK_DIR` has the headers; on Windows it has to be asked for. |
-| `VDDK_DIR` | a path | empty | An extracted VDDK. Only `include/vixDiskLib.h` is needed to build: the library is bound at run time. |
+| `VDDK_DIR` | a path | empty | An extracted VDDK, or the developer kit of [LibreVDDK](https://github.com/AltaStor/librevddk). Only `include/vixDiskLib.h` is needed to build: the library is bound at run time. |
 | `ABR_DISK_WITH_SOAP` | `AUTO`, `ON`, `OFF` | `AUTO` | The VMware backend without the VDDK. `AUTO` is on for a non-Windows target when the `vsphere-soap-lib` submodule is there; on Windows it has to be asked for. Boost and pugixml are found installed or fetched by that library. |
 | `VSPHERE_SOAP_LIB_DIR` | a path | `vsphere-soap-lib/` | Another checkout of vsphere-soap-lib. |
 | `ABR_DISK_BUILD_TESTS` | `ON`, `OFF` | `ON` standalone, `OFF` in a tool | The self-test. |
@@ -162,3 +162,22 @@ test/selftest.cpp
 - **Windows, cross:** everything compiles and links, including
   `abr-vhdx-tool.exe`.
 - **Windows, native (MSVC):** not built yet.
+
+## Authors and license
+
+abr-disk-lib is developed by [AltaStor.com](https://altastor.com), copyright © 2026 Norvitex OÜ.
+It is licensed under the [Apache License, Version 2.0](LICENSE), marked in the source files with an
+`SPDX-License-Identifier: Apache-2.0` line.
+A redistribution keeps the attribution in [NOTICE](NOTICE).
+
+[vsphere-soap-lib](vsphere-soap-lib), behind the SOAP backend, is AltaStor.com's as well, under the same license, and
+lists the licenses of its own dependencies.
+
+The VMware Virtual Disk Development Kit is neither part of this repository nor redistributed with the library.
+Its headers are needed to build the VDDK backend, and the library is loaded at run time from wherever it is installed,
+under the license it is downloaded with.
+[LibreVDDK](https://github.com/AltaStor/librevddk), a free and open-source drop-in replacement for VMware's library,
+can take its place in both: its developer kit has the headers to build with, and its library is loaded in place of
+VMware's.
+
+The Windows virtual disk API behind the Hyper-V backend is part of Windows.
